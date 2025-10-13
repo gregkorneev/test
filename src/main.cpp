@@ -161,7 +161,7 @@ int main() {
     // Header with semicolons
     csv << "order;n;avg_time_sec;gflops\n";
 
-    const int sizes[]       = {20, 100, 500, 1000};
+    const int sizes[]       = {20, 100, 500, 1200};
     const int repetitions[] = {5,   3,   2,   1   };
 
     for (int i = 0; i < 4; ++i)

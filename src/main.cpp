@@ -1,157 +1,177 @@
-#include <bits/stdc++.h>
-using namespace std;
+#include <iostream>
+#include <chrono>
+#include <random>
+#include <iomanip>
+#include <fstream>
+#include <sstream>
+#include <algorithm>
+#include <string>
 
-enum class Order {
-    IJK, IKJ, KIJ, KJI, JIK, JKI
-};
-
-static const char* order_name(Order o){
-    switch(o){
-        case Order::IJK: return "i,j,k";
-        case Order::IKJ: return "i,k,j";
-        case Order::KIJ: return "k,i,j";
-        case Order::KJI: return "k,j,i";
-        case Order::JIK: return "j,i,k";
-        case Order::JKI: return "j,k,i";
-        default: return "?";
-    }
+// ---------------- Matrix helpers ----------------
+double** createMatrix(int n) {
+    double** matrix = new double*[n];
+    for (int i = 0; i < n; ++i) matrix[i] = new double[n];
+    return matrix;
 }
 
-inline size_t idx(size_t i, size_t j, size_t n){ return i*n + j; }
+void deleteMatrix(double** matrix, int n) {
+    for (int i = 0; i < n; ++i) delete[] matrix[i];
+    delete[] matrix;
+}
 
-// Простое заполнение: чтобы детерминировать значения и не «ломать» кэш случайностями
-void fill_matrices(vector<double>& A, vector<double>& B, size_t n){
-    for(size_t i=0;i<n;i++){
-        for(size_t j=0;j<n;j++){
-            A[idx(i,j,n)] = (i + j % 7) * 0.001;    // плавные числа
-            B[idx(i,j,n)] = (i * 2 + j % 5) * 0.002;
+void initializeMatrices(double** A, double** B, double** C, int n) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<double> dis(0.0, 1.0);
+
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            B[i][j] = dis(gen);
+            C[i][j] = dis(gen);
+            A[i][j] = 0.0;
         }
     }
 }
 
-void zero_matrix(vector<double>& C){ std::fill(C.begin(), C.end(), 0.0); }
+// ---------------- Multiplication orders ----------------
+void multiply_ijk(double** A, double** B, double** C, int n) {
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j) {
+            A[i][j] = 0.0;
+            for (int k = 0; k < n; ++k)
+                A[i][j] += B[i][k] * C[k][j];
+        }
+}
 
-// Реализации шести порядков
-void mul(Order ord, const vector<double>& A, const vector<double>& B, vector<double>& C, size_t n){
-    zero_matrix(C);
-    switch(ord){
-        case Order::IJK:
-            for(size_t i=0;i<n;i++)
-                for(size_t j=0;j<n;j++){
-                    double s = 0.0;
-                    for(size_t k=0;k<n;k++)
-                        s += A[idx(i,k,n)] * B[idx(k,j,n)];
-                    C[idx(i,j,n)] = s;
-                }
-            break;
-        case Order::IKJ:
-            for(size_t i=0;i<n;i++)
-                for(size_t k=0;k<n;k++){
-                    double aik = A[idx(i,k,n)];
-                    for(size_t j=0;j<n;j++)
-                        C[idx(i,j,n)] += aik * B[idx(k,j,n)];
-                }
-            break;
-        case Order::KIJ:
-            for(size_t k=0;k<n;k++)
-                for(size_t i=0;i<n;i++){
-                    double aik = A[idx(i,k,n)];
-                    for(size_t j=0;j<n;j++)
-                        C[idx(i,j,n)] += aik * B[idx(k,j,n)];
-                }
-            break;
-        case Order::KJI:
-            for(size_t k=0;k<n;k++)
-                for(size_t j=0;j<n;j++){
-                    double bkj = B[idx(k,j,n)];
-                    for(size_t i=0;i<n;i++)
-                        C[idx(i,j,n)] += A[idx(i,k,n)] * bkj;
-                }
-            break;
-        case Order::JIK:
-            for(size_t j=0;j<n;j++)
-                for(size_t i=0;i<n;i++){
-                    double s = 0.0;
-                    for(size_t k=0;k<n;k++)
-                        s += A[idx(i,k,n)] * B[idx(k,j,n)];
-                    C[idx(i,j,n)] = s;
-                }
-            break;
-        case Order::JKI:
-            for(size_t j=0;j<n;j++)
-                for(size_t k=0;k<n;k++){
-                    double bkj = B[idx(k,j,n)];
-                    for(size_t i=0;i<n;i++)
-                        C[idx(i,j,n)] += A[idx(i,k,n)] * bkj;
-                }
-            break;
+void multiply_ikj(double** A, double** B, double** C, int n) {
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) A[i][j] = 0.0;
+        for (int k = 0; k < n; ++k)
+            for (int j = 0; j < n; ++j)
+                A[i][j] += B[i][k] * C[k][j];
     }
 }
 
-// Возвращает медиану времени (мс) из repeats прогонов
-double time_ms(function<void()> fn, int repeats){
-    vector<double> t;
-    t.reserve(repeats);
-    for(int r=0;r<repeats;r++){
-        auto t0 = chrono::high_resolution_clock::now();
-        fn();
-        auto t1 = chrono::high_resolution_clock::now();
-        double ms = chrono::duration<double, milli>(t1 - t0).count();
-        t.push_back(ms);
-    }
-    nth_element(t.begin(), t.begin()+t.size()/2, t.end());
-    return t[t.size()/2];
+void multiply_kij(double** A, double** B, double** C, int n) {
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j) A[i][j] = 0.0;
+    for (int k = 0; k < n; ++k)
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j)
+                A[i][j] += B[i][k] * C[k][j];
 }
 
-// Парсинг опциональных аргументов:
-//   --sizes 128,256,384,512
-//   --repeats 3
-// По умолчанию sizes = 128,256,384,512,640; repeats = 3
-int main(int argc, char** argv){
-    ios::sync_with_stdio(false);
+void multiply_kji(double** A, double** B, double** C, int n) {
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j) A[i][j] = 0.0;
+    for (int k = 0; k < n; ++k)
+        for (int j = 0; j < n; ++j)
+            for (int i = 0; i < n; ++i)
+                A[i][j] += B[i][k] * C[k][j];
+}
 
-    vector<size_t> sizes = {128, 256, 384, 512, 640};
-    int repeats = 3;
-
-    for(int i=1;i<argc;i++){
-        string a = argv[i];
-        if(a=="--sizes" && i+1<argc){
-            sizes.clear();
-            string s = argv[++i];
-            string cur;
-            for(char c: s){
-                if(c==','){ if(!cur.empty()){ sizes.push_back(stoul(cur)); cur.clear(); } }
-                else cur.push_back(c);
-            }
-            if(!cur.empty()) sizes.push_back(stoul(cur));
-        } else if(a=="--repeats" && i+1<argc){
-            repeats = stoi(argv[++i]);
+void multiply_jik(double** A, double** B, double** C, int n) {
+    for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i) {
+            A[i][j] = 0.0;
+            for (int k = 0; k < n; ++k)
+                A[i][j] += B[i][k] * C[k][j];
         }
-    }
+}
 
-    vector<Order> orders = {
-        Order::IJK, Order::IKJ, Order::KIJ, Order::KJI, Order::JIK, Order::JKI
-    };
+void multiply_jki(double** A, double** B, double** C, int n) {
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j) A[i][j] = 0.0;
+    for (int j = 0; j < n; ++j)
+        for (int k = 0; k < n; ++k)
+            for (int i = 0; i < n; ++i)
+                A[i][j] += B[i][k] * C[k][j];
+}
 
-    cout << "order,n,time_ms,GFLOPS\n";
+// ---------------- Timing ----------------
+double measureTime(void (*multiplyFunc)(double**, double**, double**, int),
+                   double** A, double** B, double** C, int n) {
+    auto start = std::chrono::high_resolution_clock::now();
+    multiplyFunc(A, B, C, n);
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> duration = end - start;
+    return duration.count(); // seconds
+}
 
-    for(size_t n: sizes){
-        vector<double> A(n*n), B(n*n), C(n*n);
-        fill_matrices(A, B, n);
+// Format helper: convert dot to comma for RU Excel
+std::string fmt(double x, int prec = 6) {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(prec) << x;
+    std::string s = ss.str();
+    std::replace(s.begin(), s.end(), '.', ',');
+    return s;
+}
 
-        // «разогрев» кэшей и JIT отсутствует, но полезно прогреть память
-        mul(Order::IKJ, A, B, C, n);
+// ---------------- Benchmark one size ----------------
+void benchmarkForSize(int n, int repetitions, std::ofstream& csv) {
+    std::cout << "\nMatrix size: " << n << "x" << n << "\n"
+              << "==========================================\n";
 
-        for(Order ord: orders){
-            auto runner = [&](){ mul(ord, A, B, C, n); };
-            double ms = time_ms(runner, repeats);
+    double** A = createMatrix(n);
+    double** B = createMatrix(n);
+    double** C = createMatrix(n);
+    initializeMatrices(A, B, C, n);
 
-            // теоретическое число операций умножения матриц ~ 2*n^3 FLOP
-            double gflops = (2.0 * n * n * n) / (ms / 1000.0) / 1e9;
+    auto avg = [&](auto f){ double tot=0; for(int r=0;r<repetitions;++r) tot+=measureTime(f,A,B,C,n); return tot/repetitions; };
 
-            cout << order_name(ord) << "," << n << "," << fixed << setprecision(3)
-                 << ms << "," << setprecision(2) << gflops << "\n";
-        }
-    }
+    const double avg_ijk = avg(multiply_ijk);
+    const double avg_ikj = avg(multiply_ikj);
+    const double avg_kij = avg(multiply_kij);
+    const double avg_kji = avg(multiply_kji);
+    const double avg_jik = avg(multiply_jik);
+    const double avg_jki = avg(multiply_jki);
+
+    std::cout << std::fixed << std::setprecision(6);
+    std::cout << "(i,j,k): " << avg_ijk << "s\n";
+    std::cout << "(i,k,j): " << avg_ikj << "s\n";
+    std::cout << "(k,i,j): " << avg_kij << "s\n";
+    std::cout << "(k,j,i): " << avg_kji << "s\n";
+    std::cout << "(j,i,k): " << avg_jik << "s\n";
+    std::cout << "(j,k,i): " << avg_jki << "s\n";
+
+    auto gflops = [&](double t){ return (2.0 * n * n * n) / t / 1e9; };
+
+    // Write CSV with semicolon separator for RU Excel
+    csv << "i,j,k;" << n << ";" << fmt(avg_ijk) << ";" << fmt(gflops(avg_ijk)) << "\n";
+    csv << "i,k,j;" << n << ";" << fmt(avg_ikj) << ";" << fmt(gflops(avg_ikj)) << "\n";
+    csv << "k,i,j;" << n << ";" << fmt(avg_kij) << ";" << fmt(gflops(avg_kij)) << "\n";
+    csv << "k,j,i;" << n << ";" << fmt(avg_kji) << ";" << fmt(gflops(avg_kji)) << "\n";
+    csv << "j,i,k;" << n << ";" << fmt(avg_jik) << ";" << fmt(gflops(avg_jik)) << "\n";
+    csv << "j,k,i;" << n << ";" << fmt(avg_jki) << ";" << fmt(gflops(avg_jki)) << "\n";
+
+    double min_time = avg_ijk; std::string best = "(i,j,k)";
+    auto upd = [&](double t,const char* nstr){ if (t<min_time){ min_time=t; best=nstr; } };
+    upd(avg_ikj,"(i,k,j)"); upd(avg_kij,"(k,i,j)"); upd(avg_kji,"(k,j,i)"); upd(avg_jik,"(j,i,k)"); upd(avg_jki,"(j,k,i)");
+    std::cout << "Best method: " << best << " (" << min_time << "s)\n";
+
+    deleteMatrix(A, n); deleteMatrix(B, n); deleteMatrix(C, n);
+}
+
+int main() {
+    std::cout << "Matrix Multiplication Performance Comparison\n"
+              << "==========================================\n";
+
+    // CSV in working directory
+    std::ofstream csv("results.csv");
+    // Header with semicolons
+    csv << "order;n;avg_time_sec;gflops\n";
+
+    const int sizes[]       = {20, 100, 500, 1000};
+    const int repetitions[] = {5,   3,   2,   1   };
+
+    for (int i = 0; i < 4; ++i)
+        benchmarkForSize(sizes[i], repetitions[i], csv);
+
+    csv.close();
+    std::cout << "\nРезультаты сохранены в файл: results.csv\n";
+
+    std::cout << "\n=== Analysis (short) ===\n"
+              << "- Перестановка циклов не меняет математику, но меняет паттерн доступа к памяти.\n"
+              << "- Порядки, которые проходят по строкам/столбцам последовательно, лучше используют кэш.\n";
     return 0;
 }

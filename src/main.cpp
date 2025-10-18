@@ -1,3 +1,4 @@
+
 #include <iostream>
 #include <chrono>
 #include <random>
@@ -6,6 +7,9 @@
 #include <sstream>
 #include <algorithm>
 #include <string>
+#include <vector>
+#include <cmath>
+#include <map>
 
 // ---------------- Matrix helpers ----------------
 double** createMatrix(int n) {
@@ -107,8 +111,92 @@ std::string fmt(double x, int prec = 6) {
     return s;
 }
 
+// --------- Least squares cubic fit: y ≈ a3*x^3 + a2*x^2 + a1*x + a0 ---------
+struct Poly3 { double a3, a2, a1, a0; };
+
+static bool solve4(double M[4][4], double b[4], double x[4]) {
+    int n = 4;
+    for (int i=0;i<n;i++) {
+        int br = i;
+        double mv = std::fabs(M[i][i]);
+        for (int r=i+1;r<n;r++) {
+            double v = std::fabs(M[r][i]);
+            if (v > mv) { mv = v; br = r; }
+        }
+        if (mv < 1e-18) return false;
+        if (br != i) {
+            for (int c=i;c<n;c++) std::swap(M[i][c], M[br][c]);
+            std::swap(b[i], b[br]);
+        }
+        double diag = M[i][i];
+        for (int c=i;c<n;c++) M[i][c] /= diag;
+        b[i] /= diag;
+        for (int r=0;r<n;r++) if (r!=i) {
+            double f = M[r][i];
+            if (std::fabs(f) < 1e-18) continue;
+            for (int c=i;c<n;c++) M[r][c] -= f * M[i][c];
+            b[r] -= f * b[i];
+        }
+    }
+    for (int i=0;i<n;i++) x[i] = b[i];
+    return true;
+}
+
+Poly3 polyfit3(const std::vector<double>& x, const std::vector<double>& y) {
+    double S[7] = {0};
+    for (double xv : x) {
+        double p = 1.0;
+        S[0] += 1.0;
+        for (int k=1;k<=6;k++) { p *= xv; S[k] += p; }
+    }
+    double M[4][4];
+    for (int p=0;p<4;p++)
+        for (int q=0;q<4;q++)
+            M[p][q] = S[p+q];
+    double b[4] = {0,0,0,0};
+    for (size_t i=0;i<x.size();++i) {
+        double xp[4] = {1.0, x[i], x[i]*x[i], x[i]*x[i]*x[i]};
+        for (int p=0;p<4;p++) b[p] += y[i]*xp[p];
+    }
+    double a[4];
+    if (!solve4(M,b,a)) return {0,0,0,0};
+    return {a[3], a[2], a[1], a[0]};
+}
+
+double r2_poly3(const std::vector<double>& x, const std::vector<double>& y, const Poly3& P) {
+    double ymean = 0.0;
+    for (double v: y) ymean += v;
+    ymean /= (double)y.size();
+    auto f = [&](double t){ return ((P.a3*t + P.a2)*t + P.a1)*t + P.a0; };
+    double ss_tot=0.0, ss_res=0.0;
+    for (size_t i=0;i<x.size();++i) {
+        double yi = y[i];
+        double fi = f(x[i]);
+        ss_tot += (yi - ymean)*(yi - ymean);
+        ss_res += (yi - fi)*(yi - fi);
+    }
+    if (ss_tot <= 1e-18) return 1.0;
+    return 1.0 - ss_res/ss_tot;
+}
+
+void print_poly3(const std::string& name, const Poly3& P, double r2) {
+    std::cout.setf(std::ios::scientific);
+    std::cout << std::setprecision(6);
+    std::cout << name << " trend: y = "
+              << P.a3 << "*n^3 + "
+              << P.a2 << "*n^2 + "
+              << P.a1 << "*n + "
+              << P.a0
+              << " ; R^2 = " << r2 << "\n";
+    std::cout.unsetf(std::ios::scientific);
+}
+
 // ---------------- Benchmark one size ----------------
-void benchmarkForSize(int n, int repetitions, std::ofstream& csv) {
+struct Timings {
+    double ijk, ikj, kij, kji, jik, jki;
+};
+
+Timings benchmarkForSize(int n, int repetitions, std::ofstream& csv) {
     std::cout << "\nMatrix size: " << n << "x" << n << "\n"
               << "==========================================\n";
 
@@ -136,7 +224,6 @@ void benchmarkForSize(int n, int repetitions, std::ofstream& csv) {
 
     auto gflops = [&](double t){ return (2.0 * n * n * n) / t / 1e9; };
 
-    // Write CSV with semicolon separator for RU Excel
     csv << "i,j,k;" << n << ";" << fmt(avg_ijk) << ";" << fmt(gflops(avg_ijk)) << "\n";
     csv << "i,k,j;" << n << ";" << fmt(avg_ikj) << ";" << fmt(gflops(avg_ikj)) << "\n";
     csv << "k,i,j;" << n << ";" << fmt(avg_kij) << ";" << fmt(gflops(avg_kij)) << "\n";
@@ -150,25 +237,60 @@ void benchmarkForSize(int n, int repetitions, std::ofstream& csv) {
     std::cout << "Best method: " << best << " (" << min_time << "s)\n";
 
     deleteMatrix(A, n); deleteMatrix(B, n); deleteMatrix(C, n);
+    return {avg_ijk, avg_ikj, avg_kij, avg_kji, avg_jik, avg_jki};
 }
 
 int main() {
     std::cout << "Matrix Multiplication Performance Comparison\n"
               << "==========================================\n";
 
-    // CSV in working directory
     std::ofstream csv("results.csv");
-    // Header with semicolons
     csv << "order;n;avg_time_sec;gflops\n";
 
     const int sizes[]       = {20, 100, 500, 1200};
     const int repetitions[] = {5,   3,   2,   1   };
 
-    for (int i = 0; i < 4; ++i)
-        benchmarkForSize(sizes[i], repetitions[i], csv);
+    std::vector<double> ns;
+    std::map<std::string, std::vector<double>> ys;
+    ys["i,j,k"] = {}; ys["i,k,j"] = {}; ys["k,i,j"] = {};
+    ys["k,j,i"] = {}; ys["j,i,k"] = {}; ys["j,k,i"] = {};
+
+    for (int idx = 0; idx < 4; ++idx) {
+        int n = sizes[idx];
+        Timings t = benchmarkForSize(n, repetitions[idx], csv);
+        ns.push_back((double)n);
+
+        ys["i,j,k"].push_back(t.ijk);
+        ys["i,k,j"].push_back(t.ikj);
+        ys["k,i,j"].push_back(t.kij);
+        ys["k,j,i"].push_back(t.kji);
+        ys["j,i,k"].push_back(t.jik);
+        ys["j,k,i"].push_back(t.jki);
+    }
 
     csv.close();
     std::cout << "\nРезультаты сохранены в файл: results.csv\n";
+
+    // ---------- Trend for each order ----------
+    std::cout << "\n=== Polynomial trend (3rd degree) for each order ===\n";
+    for (const auto& kv : ys) {
+        const std::string& name = kv.first;
+        const auto& y = kv.second;
+        Poly3 P = polyfit3(ns, y);
+        double r2 = r2_poly3(ns, y, P);
+        print_poly3(name, P, r2);
+    }
+
+    // ---------- Overall average trend ----------
+    std::vector<double> yavg(ns.size(), 0.0);
+    for (size_t i = 0; i < ns.size(); ++i) {
+        for (const auto& kv : ys) yavg[i] += kv.second[i];
+        yavg[i] /= static_cast<double>(ys.size());
+    }
+    Poly3 Pavg = polyfit3(ns, yavg);
+    double r2avg = r2_poly3(ns, yavg, Pavg);
+    std::cout << "\nОбщий тренд (среднее по всем порядкам):\n";
+    print_poly3("avg(all orders)", Pavg, r2avg);
 
     std::cout << "\n=== Analysis (short) ===\n"
               << "- Перестановка циклов не меняет математику, но меняет паттерн доступа к памяти.\n"

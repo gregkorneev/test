@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <chrono>
 #include <random>
@@ -247,18 +246,23 @@ int main() {
     std::ofstream csv("results.csv");
     csv << "order;n;avg_time_sec;gflops\n";
 
-    const int sizes[]       = {20, 100, 500, 1200};
-    const int repetitions[] = {5,   3,   2,   1   };
+    // ⬇⬇⬇ ДОБАВЛЕН 2500 и синхронизированы повторы
+    const int sizes[]       = {20, 100, 500, 1000, 2500};
+    const int repetitions[] = {5,   3,   2,    1,    1   };
+    const int NUM_SIZES = static_cast<int>(sizeof(sizes)/sizeof(sizes[0]));
 
     std::vector<double> ns;
+    ns.reserve(NUM_SIZES);
+
     std::map<std::string, std::vector<double>> ys;
     ys["i,j,k"] = {}; ys["i,k,j"] = {}; ys["k,i,j"] = {};
     ys["k,j,i"] = {}; ys["j,i,k"] = {}; ys["j,k,i"] = {};
+    for (auto& kv : ys) kv.second.reserve(NUM_SIZES);
 
-    for (int idx = 0; idx < 4; ++idx) {
+    for (int idx = 0; idx < NUM_SIZES; ++idx) {
         int n = sizes[idx];
         Timings t = benchmarkForSize(n, repetitions[idx], csv);
-        ns.push_back((double)n);
+        ns.push_back(static_cast<double>(n));
 
         ys["i,j,k"].push_back(t.ijk);
         ys["i,k,j"].push_back(t.ikj);

@@ -247,7 +247,7 @@ int main() {
     csv << "order;n;avg_time_sec;gflops\n";
 
     // ⬇⬇⬇ ДОБАВЛЕН 2500 и синхронизированы повторы
-    const int sizes[]       = {20, 100, 500, 1000, 2500};
+    const int sizes[]       = {100, 400, 700, 1000, 1500};
     const int repetitions[] = {5,   3,   2,    1,    1   };
     const int NUM_SIZES = static_cast<int>(sizeof(sizes)/sizeof(sizes[0]));
 
